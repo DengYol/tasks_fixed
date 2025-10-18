@@ -1,5 +1,5 @@
 name: tasks_app
-description: "Tasks App with Admin and Member roles (local + Firebase)."
+description: "Tasks App with Admin and Member roles (local + Firebase + AI Assistant)."
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -14,8 +14,10 @@ dependencies:
   # 🧩 UI & utilities
   cupertino_icons: ^1.0.8
   intl: ^0.18.1
+  image_picker: ^1.1.2   # 📸 For picking profile pictures
+  http: ^1.2.2           # 🌐 For Gemini API requests (AI Assistant)
 
-  # 🔥 Firebase packages (latest compatible versions)
+  # 🔥 Firebase packages
   firebase_core: ^3.5.0
   firebase_auth: ^5.3.1
   cloud_firestore: ^5.4.4
@@ -28,6 +30,20 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.13.1   # 🚀 For custom app icon
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/icons/
+    - assets/animations/
+
+# 🚀 App icon configuration
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/app_icon.png"
+  adaptive_icon_background: "#ffffff"
+  adaptive_icon_foreground: "assets/icons/app_icon.png"

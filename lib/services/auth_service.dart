@@ -5,14 +5,15 @@ class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // 🔹 Register user (with optional role)
+  // 🔹 Register user (with optional userType)
   Future<User?> registerWithEmail(
       String email,
       String password, {
-        String role = 'member',
+        String userType = 'member',
       }) async {
     try {
-      UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
+      UserCredential userCredential =
+      await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
@@ -20,7 +21,7 @@ class AuthService {
       // ✅ Save user data to Firestore
       await _firestore.collection('users').doc(userCredential.user!.uid).set({
         'email': email,
-        'role': role,
+        'userType': userType,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -34,8 +35,10 @@ class AuthService {
   // 🔹 Login existing user
   Future<User?> loginWithEmail(String email, String password) async {
     try {
-      UserCredential userCredential =
-      await _auth.signInWithEmailAndPassword(email: email, password: password);
+      UserCredential userCredential = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
       return userCredential.user;
     } catch (e) {
       print('Login error: $e');
