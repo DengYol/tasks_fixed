@@ -1,59 +1,77 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // 🔹 Register user (with optional userType)
+  /// 🔹 Register user (with optional userType)
   Future<User?> registerWithEmail(
       String email,
       String password, {
         String userType = 'member',
       }) async {
     try {
-      UserCredential userCredential =
-      await _auth.createUserWithEmailAndPassword(
+      final userCredential = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
 
+      final user = userCredential.user;
+
+      if (user == null) throw Exception("User creation failed.");
+
       // ✅ Save user data to Firestore
-      await _firestore.collection('users').doc(userCredential.user!.uid).set({
+      await _firestore.collection('users').doc(user.uid).set({
         'email': email,
         'userType': userType,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      return userCredential.user;
+      debugPrint("✅ User registered: $email ($userType)");
+      return user;
+    } on FirebaseAuthException catch (e) {
+      debugPrint("⚠️ FirebaseAuthException during registration: ${e.code}");
+      return null;
     } catch (e) {
-      print('Register error: $e');
+      debugPrint("🔥 Unknown error during registration: $e");
       return null;
     }
   }
 
-  // 🔹 Login existing user
+  /// 🔹 Login existing user
   Future<User?> loginWithEmail(String email, String password) async {
     try {
-      UserCredential userCredential = await _auth.signInWithEmailAndPassword(
+      final userCredential = await _auth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
+
+      debugPrint("✅ User logged in: $email");
       return userCredential.user;
+    } on FirebaseAuthException catch (e) {
+      debugPrint("⚠️ FirebaseAuthException during login: ${e.code}");
+      return null;
     } catch (e) {
-      print('Login error: $e');
+      debugPrint("🔥 Unknown login error: $e");
       return null;
     }
   }
 
-  // 🔹 Logout user
-  Future<void> logout() async {
-    await _auth.signOut();
+  /// 🔹 Sign out user (standard Firebase naming)
+  Future<void> signOut() async {
+    try {
+      await _auth.signOut();
+      debugPrint("👋 User signed out successfully.");
+    } catch (e) {
+      debugPrint("⚠️ Sign-out error: $e");
+    }
   }
 
-  // 🔹 Stream user changes (for live login/logout state)
+  /// 🔹 Stream user changes (for live login/logout state)
   Stream<User?> get userChanges => _auth.authStateChanges();
 
-  // 🔹 Get current logged-in user
+  /// 🔹 Get current logged-in user
   User? get currentUser => _auth.currentUser;
 }

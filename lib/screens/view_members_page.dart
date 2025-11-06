@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/auth_service.dart';
+import 'member_details_page.dart';
 
 class ViewMembersPage extends StatefulWidget {
   final AuthService authService;
@@ -32,10 +33,15 @@ class _ViewMembersPageState extends State<ViewMembersPage> {
       final memberList = snapshot.docs.map((doc) {
         final data = doc.data();
         return {
+          'id': doc.id,
           'name': data['fullName'] ?? 'No Name',
           'email': data['email'] ?? 'No Email',
+          'userType': data['userType'] ?? 'member',
           'createdAt': data['createdAt'] != null
-              ? (data['createdAt'] as Timestamp).toDate().toString().split(' ')[0]
+              ? (data['createdAt'] as Timestamp)
+              .toDate()
+              .toString()
+              .split(' ')[0]
               : '—',
         };
       }).toList();
@@ -53,7 +59,15 @@ class _ViewMembersPageState extends State<ViewMembersPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      appBar: AppBar(
+        title: const Row(
+          children: [
+            Icon(Icons.group, color: Colors.white),
+            SizedBox(width: 10),
+            Text('Members'),
+          ],
+        ),
+      ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : members.isEmpty
@@ -66,7 +80,7 @@ class _ViewMembersPageState extends State<ViewMembersPage> {
           itemBuilder: (context, index) {
             final member = members[index];
             return Card(
-              elevation: 3,
+              elevation: 2,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
@@ -74,14 +88,28 @@ class _ViewMembersPageState extends State<ViewMembersPage> {
               child: ListTile(
                 leading: const CircleAvatar(
                   backgroundColor: Colors.deepPurple,
-                  child: Icon(Icons.person, color: Colors.white),
+                  child:
+                  Icon(Icons.person, color: Colors.white),
                 ),
-                title: Text(member['name']),
+                title: Text(
+                  member['name'],
+                  style:
+                  const TextStyle(fontWeight: FontWeight.bold),
+                ),
                 subtitle: Text(member['email']),
-                trailing: Text(
-                  member['createdAt'],
-                  style: const TextStyle(color: Colors.black54),
-                ),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MemberDetailsPage(
+                        memberId: member['id'],
+                        memberName: member['name'],
+                        userType: member['userType'],
+                        createdAt: member['createdAt'],
+                      ),
+                    ),
+                  );
+                },
               ),
             );
           },

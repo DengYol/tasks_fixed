@@ -4,9 +4,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../services/auth_service.dart';
 
 class EditProfilePage extends StatefulWidget {
-  const EditProfilePage({super.key});
+  final AuthService authService;
+
+  const EditProfilePage({super.key, required this.authService});
 
   @override
   State<EditProfilePage> createState() => _EditProfilePageState();
@@ -131,14 +134,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // 🖼️ Background
-          Image.asset(
-            'assets/images/cover.png',
-            fit: BoxFit.cover,
-          ),
+          Image.asset('assets/images/cover.png', fit: BoxFit.cover),
           Container(color: Colors.black.withOpacity(0.4)),
-
-          // ✨ Glass-style profile editor
           Center(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(24),
@@ -152,7 +149,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // 👤 Profile Image
                     GestureDetector(
                       onTap: _pickImage,
                       child: Stack(
@@ -181,16 +177,13 @@ class _EditProfilePageState extends State<EditProfilePage> {
                       ),
                     ),
                     const SizedBox(height: 24),
-
-                    // 👤 Name Field
                     TextField(
                       controller: _nameController,
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
                         labelText: 'Full Name',
                         labelStyle: const TextStyle(color: Colors.white70),
-                        prefixIcon:
-                        const Icon(Icons.person, color: Colors.white),
+                        prefixIcon: const Icon(Icons.person, color: Colors.white),
                         filled: true,
                         fillColor: Colors.white.withOpacity(0.15),
                         border: OutlineInputBorder(
@@ -200,16 +193,13 @@ class _EditProfilePageState extends State<EditProfilePage> {
                       ),
                     ),
                     const SizedBox(height: 16),
-
-                    // 📧 Email Field
                     TextField(
                       controller: _emailController,
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
                         labelText: 'Email Address',
                         labelStyle: const TextStyle(color: Colors.white70),
-                        prefixIcon:
-                        const Icon(Icons.email, color: Colors.white),
+                        prefixIcon: const Icon(Icons.email, color: Colors.white),
                         filled: true,
                         fillColor: Colors.white.withOpacity(0.15),
                         border: OutlineInputBorder(
@@ -219,8 +209,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
                       ),
                     ),
                     const SizedBox(height: 24),
-
-                    // 💾 Save Button
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(

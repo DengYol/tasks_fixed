@@ -3,6 +3,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'screens/login_screen.dart';
+import 'screens/admin_dashboard.dart'; // ✅ Admin interface
+import 'screens/member_dashboard/member_dashboard.dart'; // ✅ Member interface
 import 'services/auth_service.dart';
 
 void main() async {
@@ -12,7 +14,7 @@ void main() async {
     await Firebase.initializeApp();
     debugPrint("✅ Firebase initialized successfully");
 
-    // Safe delay so Flutter UI loads before admin check
+    // Create default admin if not found
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _createAdminIfNotExists();
     });
@@ -48,7 +50,7 @@ Future<void> _createAdminIfNotExists() async {
             .doc(userCredential.user!.uid)
             .set({
           'email': adminEmail,
-          'userType': 'admin', // ✅ use userType for consistency
+          'userType': 'admin',
           'createdAt': FieldValue.serverTimestamp(),
         });
 
@@ -79,10 +81,103 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Tasks App',
       theme: ThemeData(
-        primarySwatch: Colors.deepPurple,
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.deepPurple,
+          brightness: Brightness.light,
+        ),
         scaffoldBackgroundColor: Colors.grey.shade100,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.deepPurple,
+          foregroundColor: Colors.white,
+          centerTitle: true,
+          elevation: 3,
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.deepPurple,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            textStyle: const TextStyle(fontSize: 16),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.deepPurple.shade200),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Colors.deepPurple, width: 1.5),
+          ),
+        ),
+        cardTheme: CardThemeData(
+          color: Colors.white,
+          elevation: 3,
+          margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.deepPurple,
+            textStyle: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
       ),
-      home: LoginScreen(authService: authService),
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          // ⏳ Show loading spinner while checking login state
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+
+          // 🔒 If not logged in, go to LoginScreen
+          if (!snapshot.hasData) {
+            return LoginScreen(authService: authService);
+          }
+
+          // ✅ If logged in, check user type from Firestore
+          final user = snapshot.data!;
+          return FutureBuilder<DocumentSnapshot>(
+            future: FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .get(),
+            builder: (context, userSnapshot) {
+              if (userSnapshot.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                );
+              }
+
+              if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
+                return const Scaffold(
+                  body: Center(
+                    child: Text("⚠️ User record not found in Firestore"),
+                  ),
+                );
+              }
+
+              final userType = userSnapshot.data!.get('userType');
+
+              // 🧭 Route user based on type
+              if (userType == 'admin') {
+                return AdminDashboard(authService: authService);
+              } else {
+                return MemberDashboard(authService: authService); // ✅ fixed
+              }
+            },
+          );
+        },
+      ),
     );
   }
 }

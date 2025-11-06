@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../services/auth_service.dart';
-import 'manage_tasks_page.dart';
-import 'view_members_page.dart';
-import 'login_screen.dart';
-import 'edit_profile_page.dart';
-import 'ai_assistant_page.dart'; // 👈 AI Assistant screen
+
+import '../screens/view_members_page.dart';
+import '../screens/ai_assistant_page.dart';
+import '../screens/monitor_progress.dart';
+import '../screens/edit_profile_page.dart';
+import '../screens/logout_screen.dart';
+import '../screens/project_page.dart';
+import '../screens/assign_task_screen.dart';
+import 'package:intl/intl.dart';
 
 class AdminDashboard extends StatefulWidget {
   final AuthService authService;
@@ -19,654 +22,431 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard> {
   int _selectedIndex = 0;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-
-  String? _profileImageUrl;
-  String? selectedMember;
-  bool assignToAll = false;
-
-  final titleController = TextEditingController();
-  final descriptionController = TextEditingController();
-
-  late List<Widget> _pages;
+  int _memberCount = 0;
+  String? _profileImageUrl; // ✅ admin profile photo
 
   @override
   void initState() {
     super.initState();
-    _pages = [
-      _buildDashboardPage(),
-      ViewMembersPage(authService: widget.authService),
-      _buildAssignTaskPage(),
-      ManageTasksPage(),
-      _buildReportsPage(),
-    ];
-    _loadAdminProfile();
+    _fetchMemberCount();
+    _fetchAdminProfile();
   }
 
-  Future<void> _loadAdminProfile() async {
-    final user = _auth.currentUser;
-    if (user == null) return;
+  Future<void> _fetchMemberCount() async {
     try {
-      final docSnap = await _firestore.collection('users').doc(user.uid).get();
-      final data = docSnap.data() as Map<String, dynamic>? ?? {};
+      final snapshot = await FirebaseFirestore.instance.collection('users').get();
       setState(() {
-        _profileImageUrl = data['profileImage'] as String?;
+        _memberCount = snapshot.docs.length;
       });
     } catch (e) {
-      debugPrint('Error loading profile image: $e');
+      debugPrint("Error fetching member count: $e");
     }
   }
 
-  /// 🔔 CHECK IF THERE ARE UNREAD SUBMISSIONS
-  Stream<int> _unreadSubmissionsCount() {
-    return _firestore
-        .collection('submissions')
-        .where('isRead', isEqualTo: false)
-        .snapshots()
-        .map((snapshot) => snapshot.docs.length);
-  }
-
-  /// 🔔 SHOW SUBMITTED WORKS
-  Future<void> _showSubmissionsDialog() async {
-    final submissions = await _firestore
-        .collection('submissions')
-        .orderBy('submittedAt', descending: true)
-        .get();
-
-    if (submissions.docs.isEmpty) {
-      showDialog(
-        context: context,
-        builder: (_) => const AlertDialog(
-          title: Text("No Submissions"),
-          content: Text("No work has been submitted yet."),
-        ),
-      );
-      return;
-    }
-
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("📥 Submitted Work"),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 400,
-          child: ListView.builder(
-            itemCount: submissions.docs.length,
-            itemBuilder: (context, index) {
-              final data = submissions.docs[index].data();
-              final title = data['taskTitle'] ?? 'Untitled';
-              final memberName = data['memberName'] ?? 'Unknown';
-              final submittedAt =
-                  data['submittedAt']?.toDate() ?? DateTime.now();
-              final status = data['status'] ?? 'Pending';
-
-              return Card(
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-                margin: const EdgeInsets.symmetric(vertical: 6),
-                child: ListTile(
-                  leading: const Icon(Icons.assignment_turned_in,
-                      color: Colors.deepPurple),
-                  title: Text(title),
-                  subtitle: Text(
-                    "By: $memberName\nStatus: $status\n${submittedAt.toLocal()}",
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              // mark all as read
-              final batch = _firestore.batch();
-              for (var doc in submissions.docs) {
-                batch.update(doc.reference, {'isRead': true});
-              }
-              await batch.commit();
-              if (context.mounted) Navigator.pop(context);
-            },
-            child: const Text("Mark All as Read"),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _assignTask() async {
-    if (titleController.text.isEmpty || descriptionController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please fill all fields")),
-      );
-      return;
-    }
-
+  /// ✅ Fetch admin profile picture
+  Future<void> _fetchAdminProfile() async {
     try {
-      if (assignToAll) {
-        final membersSnapshot = await _firestore
-            .collection('users')
-            .where('userType', isEqualTo: 'member')
-            .get();
-
-        final membersDocs = membersSnapshot.docs;
-        if (membersDocs.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("No members found to assign.")));
-          return;
-        }
-
-        final assignedIds = membersDocs.map((d) => d.id).toList();
-        final assignedNames = membersDocs
-            .map((d) => (d.data() as Map<String, dynamic>?)?['name'] ?? 'Unnamed')
-            .toList();
-        final assignedEmails = membersDocs
-            .map((d) => (d.data() as Map<String, dynamic>?)?['email'] ?? '')
-            .toList();
-
-        final taskRef = await _firestore.collection('tasks').add({
-          'title': titleController.text.trim(),
-          'description': descriptionController.text.trim(),
-          'assignedTo': assignedIds,
-          'assignedNames': assignedNames,
-          'assignedEmails': assignedEmails,
-          'status': 'Pending',
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-
-        for (var doc in membersDocs) {
-          final mData = doc.data() as Map<String, dynamic>? ?? {};
-          await _firestore.collection('notifications').add({
-            'title': 'New Task Assigned',
-            'message':
-            'A new task "${titleController.text.trim()}" has been assigned to you.',
-            'userId': doc.id,
-            'userEmail': mData['email'] ?? '',
-            'taskId': taskRef.id,
-            'timestamp': FieldValue.serverTimestamp(),
-            'isRead': false,
+      final user = widget.authService.currentUser;
+      if (user != null) {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        if (doc.exists) {
+          setState(() {
+            _profileImageUrl = doc.data()?['profileImageUrl'];
           });
         }
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("✅ Task assigned to all members")),
-        );
-      } else if (selectedMember != null) {
-        final docSnap =
-        await _firestore.collection('users').doc(selectedMember).get();
-        final memberData = docSnap.data() as Map<String, dynamic>? ?? {};
-        final memberId = docSnap.id;
-        final memberName = memberData['name'] ?? 'Unnamed';
-        final memberEmail = memberData['email'] ?? '';
-
-        final taskRef = await _firestore.collection('tasks').add({
-          'title': titleController.text.trim(),
-          'description': descriptionController.text.trim(),
-          'assignedTo': [memberId],
-          'assignedNames': [memberName],
-          'assignedEmails': [memberEmail],
-          'status': 'Pending',
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-
-        await _firestore.collection('notifications').add({
-          'title': 'New Task Assigned',
-          'message':
-          'You have a new task: "${titleController.text.trim()}".',
-          'userId': memberId,
-          'userEmail': memberEmail,
-          'taskId': taskRef.id,
-          'timestamp': FieldValue.serverTimestamp(),
-          'isRead': false,
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("✅ Task assigned to $memberName")),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text("Please select a member or choose 'Select All'")),
-        );
       }
-
-      titleController.clear();
-      descriptionController.clear();
-      setState(() {
-        assignToAll = false;
-        selectedMember = null;
-      });
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("❌ Failed to assign task: $e")),
-      );
+      debugPrint("Error fetching admin profile: $e");
     }
   }
+
+  late final List<Widget> _pages = [
+    _buildHomeScreen(),
+    ViewMembersPage(authService: widget.authService),
+    const MonitorProgress(),
+    const ProjectPage(),
+    const AssignTasksScreen(),
+  ];
 
   void _onItemTapped(int index) => setState(() => _selectedIndex = index);
 
-  Future<void> _logout() async {
-    await widget.authService.logout();
-    if (!mounted) return;
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(
-        builder: (_) => LoginScreen(authService: widget.authService),
+  /// 🔹 HOME SCREEN (Overview of Projects + Tasks)
+  Widget _buildHomeScreen() {
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 🔹 Top Bar
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.menu_rounded, color: Colors.deepPurple),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => _buildMenuScreenWrapper(context),
+                      ),
+                    );
+                  },
+                ),
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: Colors.deepPurple.shade100,
+                  backgroundImage: _profileImageUrl != null
+                      ? NetworkImage(_profileImageUrl!)
+                      : null,
+                  child: _profileImageUrl == null
+                      ? const Icon(Icons.person, color: Colors.deepPurple)
+                      : null,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            Text(
+              "Welcome, Admin 👋",
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "Here’s a quick look at ongoing work and deadlines.",
+              style: TextStyle(color: Colors.black54),
+            ),
+            const SizedBox(height: 20),
+
+            GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AIAssistantPage()),
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.smart_toy_outlined, color: Colors.deepPurple),
+                    SizedBox(width: 10),
+                    Text(
+                      "Ask AI Assistant or Search",
+                      style: TextStyle(color: Colors.black54, fontSize: 16),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 25),
+
+            const Text(
+              "📁 Projects Overview",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.deepPurple,
+              ),
+            ),
+            const SizedBox(height: 10),
+            _buildProjectOverview(),
+
+            const SizedBox(height: 25),
+
+            const Text(
+              "📝 Tasks Overview",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.deepPurple,
+              ),
+            ),
+            const SizedBox(height: 10),
+            _buildTaskOverview(),
+          ],
+        ),
       ),
-          (route) => false,
     );
   }
 
-  /// 📊 DASHBOARD PAGE (with AI Assistant banner)
-  Widget _buildDashboardPage() {
+  /// ✅ Project Overview
+  Widget _buildProjectOverview() {
     return StreamBuilder<QuerySnapshot>(
-      stream: _firestore
-          .collection('tasks')
-          .orderBy('createdAt', descending: true)
-          .snapshots(),
-      builder: (context, taskSnapshot) {
-        return StreamBuilder<QuerySnapshot>(
-          stream: _firestore
-              .collection('users')
-              .where('userType', isEqualTo: 'member')
-              .snapshots(),
-          builder: (context, userSnapshot) {
-            if (!taskSnapshot.hasData || !userSnapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
+      stream: FirebaseFirestore.instance.collection('projects').snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        final docs = snapshot.data!.docs;
 
-            final tasks = taskSnapshot.data!.docs;
-            final membersDocs = userSnapshot.data!.docs;
+        int completed = 0, inProgress = 0, notStarted = 0, dueSoon = 0;
+        final now = DateTime.now();
 
-            final Map<String, String> memberIdToName = {
-              for (var d in membersDocs)
-                d.id: ((d.data() as Map<String, dynamic>?)?['name'] ?? 'Unnamed')
-            };
+        for (var doc in docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          final status = data['status'] ?? 'Not Started';
+          final dueDateRaw = data['dueDate'];
+          DateTime dueDate = now.add(const Duration(days: 30));
 
-            int pending = tasks
-                .where((task) =>
-            ((task.data() as Map<String, dynamic>)['status'] ?? '') ==
-                'Pending')
-                .length;
-            int completed = tasks
-                .where((task) =>
-            ((task.data() as Map<String, dynamic>)['status'] ?? '') ==
-                'Completed')
-                .length;
+          if (dueDateRaw is Timestamp) {
+            dueDate = dueDateRaw.toDate();
+          } else if (dueDateRaw is String) {
+            dueDate = DateTime.tryParse(dueDateRaw) ?? dueDate;
+          }
 
-            final recentActivities = tasks.take(5).map((task) {
-              final data = task.data() as Map<String, dynamic>? ?? {};
-              final title = data['title'] ?? 'Untitled';
-              final status = data['status'] ?? 'Pending';
-              final assignedToRaw = data['assignedTo'];
-              String assignedToStr = 'Unassigned';
-              if (assignedToRaw is List) {
-                final ids = List<String>.from(assignedToRaw);
-                final names =
-                ids.map((id) => memberIdToName[id] ?? id).toList();
-                if (names.isEmpty) {
-                  assignedToStr = 'Unassigned';
-                } else if (names.length == 1) {
-                  assignedToStr = names.first;
-                } else {
-                  assignedToStr =
-                  '${names.take(2).join(", ")}${names.length > 2 ? " +${names.length - 2}" : ""}';
-                }
-              } else if (assignedToRaw is String) {
-                assignedToStr = assignedToRaw;
-              }
-              return "📋 $title - $status (→ $assignedToStr)";
-            }).toList();
+          if (status == 'Completed') completed++;
+          else if (status == 'In Progress') inProgress++;
+          else notStarted++;
 
-            return SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 🧠 AI Assistant banner
-                  GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const AIAssistantPage(),
-                        ),
-                      );
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.deepPurple.shade50,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black12,
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: const BoxDecoration(
-                              color: Colors.deepPurple,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(Icons.smart_toy_outlined,
-                                color: Colors.white),
-                          ),
-                          const SizedBox(width: 14),
-                          const Expanded(
-                            child: Text(
-                              "AI Assistant 🤖\nAsk questions or generate ideas instantly.",
-                              style: TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                          const Icon(Icons.arrow_forward_ios,
-                              size: 18, color: Colors.deepPurple),
-                        ],
-                      ),
-                    ),
-                  ),
+          if (dueDate.difference(now).inDays <= 3 && status != 'Completed') {
+            dueSoon++;
+          }
+        }
 
-                  const SizedBox(height: 20),
+        final total = docs.length;
+        final progressPercent = total == 0 ? 0 : ((completed / total) * 100).toInt();
 
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: Image.asset(
-                      'assets/images/banner.jpg',
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      height: 180,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    "Welcome back, Admin 👋",
-                    style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.deepPurple),
-                  ),
-                  const SizedBox(height: 10),
-                  const Text("Here’s today’s workspace summary:",
-                      style: TextStyle(fontSize: 16, color: Colors.black54)),
-                  const SizedBox(height: 20),
-                  GridView.count(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    children: [
-                      _buildStatCard("Members", "${membersDocs.length}",
-                          Icons.group, Colors.deepPurple),
-                      _buildStatCard("Pending", "$pending",
-                          Icons.pending_actions, Colors.orange),
-                      _buildStatCard("Completed", "$completed",
-                          Icons.check_circle, Colors.green),
-                      _buildStatCard(
-                          "Reports", "—", Icons.bar_chart, Colors.blue),
-                    ],
-                  ),
-                  const SizedBox(height: 30),
-                  const Text("Recent Activities",
-                      style:
-                      TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 10),
-                  if (recentActivities.isEmpty)
-                    const Text("No recent activities found.")
-                  else
-                    for (var act in recentActivities)
-                      _buildActivityItem(act),
-                ],
-              ),
+        return GestureDetector(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ProjectPage()),
             );
           },
-        );
-      },
-    );
-  }
-
-  Widget _buildAssignTaskPage() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _firestore
-          .collection('users')
-          .where('userType', isEqualTo: 'member')
-          .snapshots(),
-      builder: (context, snapshot) {
-        final members = snapshot.data?.docs ?? [];
-
-        return Padding(
-          padding: const EdgeInsets.all(16),
-          child: ListView(
-            children: [
-              const Text("📝 Assign Task",
-                  style:
-                  TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              TextField(
-                controller: titleController,
-                decoration: const InputDecoration(
-                    labelText: "Title", border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: descriptionController,
-                decoration: const InputDecoration(
-                    labelText: "Description", border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
-                value: assignToAll ? null : selectedMember,
-                items: [
-                  const DropdownMenuItem(
-                      value: 'all', child: Text('Select All Members')),
-                  ...members.map((doc) {
-                    final data = doc.data() as Map<String, dynamic>? ?? {};
-                    final name = (data['name'] ?? 'Unnamed') as String;
-                    return DropdownMenuItem(value: doc.id, child: Text(name));
-                  }),
-                ],
-                onChanged: (value) {
-                  if (value == 'all') {
-                    setState(() {
-                      assignToAll = true;
-                      selectedMember = null;
-                    });
-                  } else {
-                    setState(() {
-                      assignToAll = false;
-                      selectedMember = value;
-                    });
-                  }
-                },
-                decoration: const InputDecoration(
-                    labelText: "Assign To", border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: _assignTask,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.deepPurple,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-                child: const Text("Assign Task"),
-              ),
-            ],
+          child: _buildOverviewCard(
+            "Projects",
+            total,
+            completed,
+            inProgress,
+            notStarted,
+            progressPercent,
+            dueSoon,
           ),
         );
       },
     );
   }
 
-  Widget _buildReportsPage() => const Center(
-      child: Text("📊 Reports Coming Soon",
-          style: TextStyle(fontSize: 18, color: Colors.black54)));
+  /// ✅ Task Overview
+  Widget _buildTaskOverview() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('tasks').snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        final docs = snapshot.data!.docs;
 
-  Widget _buildStatCard(
-      String title, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black12, blurRadius: 6, offset: const Offset(0, 3))
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: color, size: 30),
-          const SizedBox(height: 10),
-          Text(title,
-              style: const TextStyle(fontSize: 16, color: Colors.black54)),
-          Text(value,
-              style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87)),
-        ],
+        int completed = 0, inProgress = 0, pending = 0, dueSoon = 0;
+        final now = DateTime.now();
+
+        for (var doc in docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          final status = data['status'] ?? 'Pending';
+          final dueDateRaw = data['dueDate'];
+          DateTime dueDate = now.add(const Duration(days: 30));
+
+          if (dueDateRaw is Timestamp) {
+            dueDate = dueDateRaw.toDate();
+          } else if (dueDateRaw is String) {
+            dueDate = DateTime.tryParse(dueDateRaw) ?? dueDate;
+          }
+
+          if (status == 'Completed') completed++;
+          else if (status == 'In Progress') inProgress++;
+          else pending++;
+
+          if (dueDate.difference(now).inDays <= 3 && status != 'Completed') {
+            dueSoon++;
+          }
+        }
+
+        final total = docs.length;
+        final progressPercent = total == 0 ? 0 : ((completed / total) * 100).toInt();
+
+        return GestureDetector(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AssignTasksScreen()),
+            );
+          },
+          child: _buildOverviewCard(
+            "Tasks",
+            total,
+            completed,
+            inProgress,
+            pending,
+            progressPercent,
+            dueSoon,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildOverviewCard(
+      String title,
+      int total,
+      int completed,
+      int mid,
+      int pending,
+      int progressPercent,
+      int dueSoon,
+      ) {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 3,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("Total $title: $total", style: const TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            Text("Completed: $completed, In Progress: $mid, Pending: $pending"),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: progressPercent / 100,
+              color: Colors.deepPurple,
+              backgroundColor: Colors.deepPurple.shade100,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "Progress: $progressPercent% • $dueSoon due soon",
+              style: const TextStyle(color: Colors.black54),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildActivityItem(String text) {
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.only(bottom: 10),
-      shape:
-      RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: ListTile(
-        leading: const Icon(Icons.bolt, color: Colors.deepPurple),
-        title: Text(text),
-        trailing: const Icon(Icons.arrow_forward_ios,
-            size: 16, color: Colors.grey),
+  /// 🔹 Menu Wrapper
+  Widget _buildMenuScreenWrapper(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Admin Menu", style: TextStyle(color: Colors.deepPurple)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.deepPurple),
       ),
+      body: _buildMenuScreen(),
+    );
+  }
+
+  /// 🔹 Menu Content
+  Widget _buildMenuScreen() {
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        const SizedBox(height: 20),
+        Center(
+          child: CircleAvatar(
+            radius: 40,
+            backgroundImage: _profileImageUrl != null ? NetworkImage(_profileImageUrl!) : null,
+            backgroundColor: Colors.deepPurple.shade100,
+            child: _profileImageUrl == null
+                ? const Icon(Icons.person, size: 50, color: Colors.deepPurple)
+                : null,
+          ),
+        ),
+        const SizedBox(height: 10),
+        const Center(
+          child: Text("Admin Menu", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        ),
+        const SizedBox(height: 30),
+        _buildMenuTile(Icons.edit, "Edit Profile", Colors.blue, () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => EditProfilePage(authService: widget.authService),
+            ),
+          );
+        }),
+        _buildMenuTile(Icons.logout, "Logout", Colors.red, () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => LogoutScreen(authService: widget.authService),
+            ),
+          );
+        }),
+        _buildMenuTile(Icons.help_outline, "Help & Support", Colors.green, () {
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text("Help & Support"),
+              content: const Text("For any issues or assistance, contact support@tasksApp.co.ke"),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text("OK")),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildMenuTile(IconData icon, String title, Color color, VoidCallback onTap) {
+    return ListTile(
+      leading: Icon(icon, color: color, size: 28),
+      title: Text(title, style: const TextStyle(fontSize: 16)),
+      onTap: onTap,
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
-      appBar: AppBar(
-        elevation: 1,
-        backgroundColor: Colors.white,
-        title: const Row(
-          children: [
-            Icon(Icons.task_alt, color: Colors.deepPurple),
-            SizedBox(width: 8),
-            Text("Admin Panel",
-                style: TextStyle(
-                    color: Colors.deepPurple,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 20)),
-          ],
-        ),
-        actions: [
-          // 🔔 NOTIFICATION ICON WITH GREEN DOT
-          StreamBuilder<int>(
-            stream: _unreadSubmissionsCount(),
-            builder: (context, snapshot) {
-              final hasUnread = (snapshot.data ?? 0) > 0;
-              return Stack(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.notifications_outlined,
-                        color: Colors.deepPurple),
-                    onPressed: _showSubmissionsDialog,
-                  ),
-                  if (hasUnread)
-                    Positioned(
-                      right: 12,
-                      top: 12,
-                      child: Container(
-                        width: 10,
-                        height: 10,
-                        decoration: const BoxDecoration(
-                          color: Colors.green,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
-
-          PopupMenuButton<String>(
-            icon: CircleAvatar(
-              radius: 18,
-              backgroundImage: _profileImageUrl != null
-                  ? NetworkImage(_profileImageUrl!)
-                  : const AssetImage('assets/images/profile.png')
-              as ImageProvider,
-            ),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14)),
-            onSelected: (choice) async {
-              if (choice == 'Logout') {
-                _logout();
-              } else if (choice == 'Settings') {
-                await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const EditProfilePage()));
-                _loadAdminProfile();
-              }
-            },
-            itemBuilder: (BuildContext context) => const [
-              PopupMenuItem(
-                  value: 'Settings',
-                  child: Row(children: [
-                    Icon(Icons.settings_outlined,
-                        color: Colors.deepPurple),
-                    SizedBox(width: 10),
-                    Text("Edit Profile")
-                  ])),
-              PopupMenuDivider(),
-              PopupMenuItem(
-                  value: 'Logout',
-                  child: Row(children: [
-                    Icon(Icons.logout, color: Colors.redAccent),
-                    SizedBox(width: 10),
-                    Text("Logout")
-                  ])),
-            ],
-          ),
-        ],
-      ),
-      body: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 300),
-          child: _pages[_selectedIndex]),
+      backgroundColor: Colors.white,
+      body: _pages[_selectedIndex],
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: _onItemTapped,
+        type: BottomNavigationBarType.fixed,
         selectedItemColor: Colors.deepPurple,
         unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
+        showUnselectedLabels: true,
         backgroundColor: Colors.white,
-        items: const [
+        elevation: 10,
+        items: [
+          const BottomNavigationBarItem(icon: Icon(Icons.home_filled), label: "Home"),
           BottomNavigationBarItem(
-              icon: Icon(Icons.dashboard_outlined), label: 'Dashboard'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.group_outlined), label: 'Members'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.add_circle_outline), label: 'Assign'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.list_alt_outlined), label: 'Manage'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.bar_chart_outlined), label: 'Reports'),
+            icon: Stack(
+              children: [
+                const Icon(Icons.people_alt_outlined),
+                if (_memberCount > 0)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: Colors.deepPurple,
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                      child: Text(
+                        _memberCount.toString(),
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            label: "Members",
+          ),
+          const BottomNavigationBarItem(icon: Icon(Icons.bar_chart_rounded), label: "Progress"),
+          const BottomNavigationBarItem(
+              icon: Icon(Icons.assignment_turned_in_outlined), label: "Projects"),
+          const BottomNavigationBarItem(icon: Icon(Icons.task_alt_rounded), label: "Tasks"),
         ],
       ),
     );

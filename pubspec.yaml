@@ -16,15 +16,18 @@ dependencies:
   intl: ^0.18.1
   image_picker: ^1.1.2   # 📸 For picking profile pictures
   http: ^1.2.2           # 🌐 For Gemini API requests (AI Assistant)
+  percent_indicator: ^4.2.3
 
   # 🔥 Firebase packages
   firebase_core: ^3.5.0
   firebase_auth: ^5.3.1
   cloud_firestore: ^5.4.4
   firebase_storage: ^12.3.0
+  url_launcher: ^6.3.2
 
   # 📁 File picker for attachments
-  file_picker: ^8.1.2
+  file_picker: ^10.3.3
+  google_generative_ai: 0.4.7
 
 dev_dependencies:
   flutter_test:
